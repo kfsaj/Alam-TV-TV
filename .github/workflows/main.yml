@@ -1,10 +1,13 @@
 
-name: Build Alam TV APK
+name: Build and Check Alam TV APK
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -14,7 +17,7 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -25,13 +28,69 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build APK
+      - name: Verify application permissions
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          path = "AlamTV/app/src/main/AndroidManifest.xml"
+          root = ET.parse(path).getroot()
+          ns = "{http://schemas.android.com/apk/res/android}"
+
+          permissions = {
+              item.get(ns + "name")
+              for item in root.findall("uses-permission")
+          }
+
+          assert permissions == {
+              "android.permission.INTERNET"
+          }, f"Unexpected permissions: {permissions}"
+
+          app = root.find("application")
+          assert app is not None
+          assert app.get(ns + "usesCleartextTraffic") == "false"
+
+          print("Manifest security checks passed.")
+          PY
+
+      - name: Build Android APK
         working-directory: AlamTV
         run: gradle --no-daemon assembleDebug
 
-      - name: Upload APK
+      - name: Verify APK integrity
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import pathlib
+          import zipfile
+
+          folder = pathlib.Path(
+              "AlamTV/app/build/outputs/apk/debug"
+          )
+          apks = list(folder.glob("*.apk"))
+          assert len(apks) == 1, "Expected exactly one APK"
+
+          apk = apks[0]
+
+          with zipfile.ZipFile(apk) as archive:
+              assert archive.testzip() is None
+              assert "AndroidManifest.xml" in archive.namelist()
+
+          digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+
+          (folder / "SHA256SUMS.txt").write_text(
+              f"{digest}  {apk.name}\n"
+          )
+
+          print("APK verified successfully")
+          print("SHA-256:", digest)
+          PY
+
+      - name: Upload verified APK
         uses: actions/upload-artifact@v4
         with:
-          name: AlamTV-APK
-          path: AlamTV/app/build/outputs/apk/debug/*.apk
+          name: AlamTV-Checked-APK
+          path: |
+            AlamTV/app/build/outputs/apk/debug/*.apk
+            AlamTV/app/build/outputs/apk/debug/SHA256SUMS.txt
           if-no-files-found: error
