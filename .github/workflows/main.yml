@@ -32,5 +32,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: AlamTV-APK
-          path: path: AlamTV/app/build/outputs/apk/debug/*.apk
+          path: AlamTV/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
